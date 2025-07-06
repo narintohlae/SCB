@@ -3,12 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>รายงานรับโอนเงินรายวัน</title>
+    <title>รายงานรับโอนเงินรายวัน (หลายชีท)</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
     <style>
-        /* CSS Variables for easy theming */
         :root {
             --primary-color: #4a90e2;
             --secondary-color: #f5f7fa;
@@ -17,9 +16,8 @@
             --shadow-color: rgba(0, 0, 0, 0.1);
             --success-color: #28a745;
             --error-color: #d9534f;
+            --tab-inactive-color: #777;
         }
-
-        /* Basic Setup */
         body {
             font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
             margin: 0;
@@ -28,8 +26,6 @@
             color: var(--font-color);
             line-height: 1.6;
         }
-
-        /* Main Container */
         .container {
             max-width: 800px;
             margin: 0 auto;
@@ -38,11 +34,9 @@
             border-radius: 12px;
             box-shadow: 0 4px 15px var(--shadow-color);
         }
-
-        /* Header Section */
         header {
             text-align: center;
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
             border-bottom: 2px solid var(--primary-color);
             padding-bottom: 1rem;
         }
@@ -57,8 +51,36 @@
             color: #667;
             font-size: 0.9rem;
         }
+        
+        /* Tabs Styling */
+        .tabs-container {
+            display: flex;
+            overflow-x: auto;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 1.5rem;
+            padding-bottom: 5px;
+        }
+        .tab {
+            padding: 0.7rem 1.2rem;
+            cursor: pointer;
+            background-color: transparent;
+            border: none;
+            border-bottom: 3px solid transparent;
+            font-family: 'Sarabun', sans-serif;
+            font-size: 1rem;
+            font-weight: 600;
+            color: var(--tab-inactive-color);
+            white-space: nowrap;
+            transition: all 0.2s ease-in-out;
+        }
+        .tab:hover {
+            color: var(--primary-color);
+        }
+        .tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
 
-        /* Loading Spinner */
         .loading-spinner {
             display: flex;
             justify-content: center;
@@ -77,14 +99,10 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
-
-        /* Responsive Table Wrapper */
         .table-wrapper {
             overflow-x: auto;
-            -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+            -webkit-overflow-scrolling: touch;
         }
-        
-        /* Data Table Styling */
         .report-table {
             width: 100%;
             border-collapse: collapse;
@@ -93,7 +111,7 @@
             padding: 0.9rem 1rem;
             text-align: left;
             border-bottom: 1px solid var(--border-color);
-            white-space: nowrap; /* Prevent text wrapping */
+            white-space: nowrap;
         }
         .report-table thead {
             background-color: var(--primary-color);
@@ -108,8 +126,6 @@
         .report-table tbody tr:hover {
             background-color: #e9eff5;
         }
-
-        /* Total Summary Box */
         .total-summary {
             margin-top: 2rem;
             padding: 1.5rem;
@@ -130,8 +146,6 @@
             font-size: 2.5rem;
             font-weight: 700;
         }
-
-        /* Error Message Styling */
         .error-message {
             text-align: center;
             padding: 2rem;
@@ -146,9 +160,11 @@
 
     <div class="container">
         <header>
-            <h1>📊 รายงานรับโอนเงินรายวัน</h1>
+            <h1>📊 รายงานสรุปยอด</h1>
             <p class="last-updated">อัปเดตล่าสุด: <span id="last-updated">กำลังโหลด...</span></p>
         </header>
+
+        <div id="tabs-container" class="tabs-container"></div>
 
         <div id="loader" class="loading-spinner">
             <div class="spinner"></div>
@@ -174,8 +190,14 @@
 
     <script>
         document.addEventListener("DOMContentLoaded", () => {
-            // URL ของ Google Sheets ที่เผยแพร่เป็น CSV
-            const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSncBoJW7dCDJPxLKLd6pHdS8MM_TkYlv4dF4hmnr_wGfWm-yEi9c4i8PQ0M-PO7d9hlGvTSZKwKYI5/pub?output=csv';
+            // ================== การตั้งค่าที่ต้องแก้ไข ==================
+            // 1. ใส่ Google API Key ของคุณที่นี่
+            const API_KEY = 'AIzaSyAMEHc0Ww1Tp4A9sHzZ6xHpHuE-E_cmNNA'; 
+
+            // 2. ใส่ Spreadsheet ID ของคุณที่นี่
+            const SPREADSHEET_ID = '1sQfhnoSNa9-7E6cNDpzjCpr47nLHZw9nFC4aT3dFdPM';
+            // ==========================================================
+
 
             // ดึง Element ต่างๆ จากหน้าเว็บ
             const loader = document.getElementById('loader');
@@ -186,79 +208,129 @@
             const totalAmountEl = document.getElementById('total-amount');
             const lastUpdatedEl = document.getElementById('last-updated');
             const errorContainer = document.getElementById('error-container');
+            const tabsContainer = document.getElementById('tabs-container');
 
             /**
-             * ฟังก์ชันหลักสำหรับดึงและแสดงข้อมูล
+             * ฟังก์ชันเริ่มต้นการทำงานของแอป
              */
-            async function fetchData() {
+            async function initializeApp() {
+                if (API_KEY === 'YOUR_API_KEY') {
+                    showError('กรุณาใส่ Google API Key ของคุณในไฟล์โค้ด');
+                    return;
+                }
+                showLoader();
                 try {
-                    // ใช้ timestamp เพื่อป้องกันปัญหา browser cache และดึงข้อมูลใหม่เสมอ
-                    const response = await fetch(`${CSV_URL}&t=${new Date().getTime()}`);
-                    if (!response.ok) {
-                        throw new Error(`ไม่สามารถโหลดข้อมูลได้ (Status: ${response.status})`);
+                    const sheetNames = await fetchSheetNames();
+                    createTabs(sheetNames);
+                    if (sheetNames.length > 0) {
+                        await fetchSheetData(sheetNames[0]);
+                    } else {
+                        showError('ไม่พบชีทใดๆ ในเอกสารนี้');
                     }
-                    const csvData = await response.text();
+                } catch (error) {
+                    showError(error.message);
+                }
+            }
+
+            /**
+             * ดึงรายชื่อชีททั้งหมดจาก Spreadsheet
+             */
+            async function fetchSheetNames() {
+                const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}?key=${API_KEY}`;
+                const response = await fetch(url);
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    const errorMessage = errorData.error?.message || `ไม่สามารถดึงรายชื่อชีทได้ (Status: ${response.status})`;
+                    throw new Error(errorMessage);
+                }
+                const data = await response.json();
+                return data.sheets.map(sheet => sheet.properties.title);
+            }
+
+            /**
+             * สร้างแท็บสำหรับเลือกชีท
+             * @param {string[]} sheetNames - อาร์เรย์ของชื่อชีท
+             */
+            function createTabs(sheetNames) {
+                tabsContainer.innerHTML = '';
+                sheetNames.forEach((name, index) => {
+                    const tab = document.createElement('button');
+                    tab.className = 'tab';
+                    tab.textContent = name;
+                    if (index === 0) {
+                        tab.classList.add('active');
+                    }
+                    tab.addEventListener('click', () => {
+                        document.querySelector('.tab.active').classList.remove('active');
+                        tab.classList.add('active');
+                        fetchSheetData(name);
+                    });
+                    tabsContainer.appendChild(tab);
+                });
+            }
+
+            /**
+             * ดึงข้อมูลจากชีทที่ระบุ
+             * @param {string} sheetName - ชื่อของชีทที่ต้องการดึงข้อมูล
+             */
+            async function fetchSheetData(sheetName) {
+                showLoader();
+                try {
+                    const encodedSheetName = encodeURIComponent(sheetName);
+                    const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodedSheetName}?key=${API_KEY}`;
+                    const response = await fetch(url);
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        const errorMessage = errorData.error?.message || `ไม่สามารถโหลดข้อมูลจากชีท "${sheetName}" ได้`;
+                        throw new Error(errorMessage);
+                    }
+                    const data = await response.json();
                     
-                    parseAndDisplayCSV(csvData);
+                    parseAndDisplayData(data.values || []);
                     
-                    // อัปเดตเวลาล่าสุด
                     const now = new Date();
                     lastUpdatedEl.textContent = now.toLocaleDateString('th-TH', {
                         year: 'numeric', month: 'long', day: 'numeric',
                         hour: '2-digit', minute: '2-digit'
                     }) + ' น.';
                     
-                    // แสดงผลลัพธ์และซ่อนตัวโหลด
-                    loader.style.display = 'none';
-                    reportTable.style.display = 'table';
-                    totalSummary.style.display = 'block';
-
+                    hideLoader();
                 } catch (error) {
-                    // แสดงข้อความเมื่อเกิดข้อผิดพลาด
-                    loader.style.display = 'none';
-                    errorContainer.style.display = 'block';
-                    errorContainer.innerHTML = `<div class="error-message"><strong>เกิดข้อผิดพลาด:</strong> ${error.message}<br>กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตและลองอีกครั้ง</div>`;
-                    console.error('Fetch Error:', error);
+                    showError(error.message);
                 }
             }
 
             /**
-             * ฟังก์ชันสำหรับแปลงข้อมูล CSV และแสดงผลในตาราง
-             * @param {string} csvData - ข้อมูลดิบในรูปแบบ CSV
+             * แปลงข้อมูลและแสดงผลในตาราง
+             * @param {Array<Array<string>>} rows - ข้อมูลจาก API (อาร์เรย์ของแถว)
              */
-            function parseAndDisplayCSV(csvData) {
-                const rows = csvData.trim().split(/\r?\n/);
-                if (rows.length < 2) {
-                    tableBody.innerHTML = '<tr><td colspan="100%" style="text-align:center;">ไม่พบข้อมูล</td></tr>';
+            function parseAndDisplayData(rows) {
+                if (rows.length === 0) {
+                    tableBody.innerHTML = '<tr><td colspan="100%" style="text-align:center;">ไม่พบข้อมูลในชีทนี้</td></tr>';
+                    tableHeader.innerHTML = '';
+                    totalSummary.style.display = 'none';
                     return;
                 }
                 
-                const headers = rows[0].split(',');
+                const headers = rows[0];
                 const dataRows = rows.slice(1);
 
-                // 1. สร้าง Header ของตาราง
                 tableHeader.innerHTML = headers.map(header => `<th>${header.trim()}</th>`).join('');
 
-                // 2. ค้นหาคอลัมน์ที่มีจำนวนเงิน (Amount)
-                // ทำให้การค้นหาไม่สนตัวพิมพ์เล็ก-ใหญ่ (case-insensitive)
                 const amountColumnIndex = headers.findIndex(header => 
                     header.trim().toLowerCase().includes('amount') || header.trim().includes('ยอด')
                 );
 
                 let totalAmount = 0;
-                tableBody.innerHTML = ''; // เคลียร์ข้อมูลเก่าก่อนแสดงผลใหม่
+                tableBody.innerHTML = '';
 
-                // 3. สร้าง Body ของตารางและคำนวณยอดรวม
-                dataRows.forEach(rowStr => {
-                    if (!rowStr) return; // ข้ามแถวที่ว่างเปล่า
+                dataRows.forEach(rowData => {
+                    if (rowData.every(cell => !cell)) return;
                     
-                    const rowData = rowStr.split(',');
                     const rowElement = document.createElement('tr');
-                    
                     let cellHtml = '';
-                    rowData.forEach((cellData, index) => {
-                        const trimmedData = cellData.trim();
-                        // ทำให้คอลัมน์ที่เป็นตัวเลขชิดขวาเพื่อความสวยงาม
+                    rowData.forEach(cellData => {
+                        const trimmedData = cellData ? cellData.trim() : '';
                         const isNumeric = !isNaN(parseFloat(trimmedData)) && isFinite(trimmedData);
                         const alignStyle = isNumeric ? 'style="text-align: right;"' : '';
                         cellHtml += `<td ${alignStyle}>${trimmedData}</td>`;
@@ -266,28 +338,45 @@
                     rowElement.innerHTML = cellHtml;
                     tableBody.appendChild(rowElement);
 
-                    // คำนวณยอดรวมจากคอลัมน์ที่ถูกต้อง
                     if (amountColumnIndex !== -1 && rowData[amountColumnIndex]) {
-                        // ลบตัวอักษรที่ไม่ใช่ตัวเลขออก (ยกเว้นจุดทศนิยม)
-                        const amount = parseFloat(rowData[amountColumnIndex].replace(/[^0-9.-]+/g,""));
+                        const amount = parseFloat(String(rowData[amountColumnIndex]).replace(/[^0-9.-]+/g,""));
                         if (!isNaN(amount)) {
                             totalAmount += amount;
                         }
                     }
                 });
 
-                // 4. แสดงผลยอดรวม
                 if (amountColumnIndex !== -1) {
                     totalAmountEl.textContent = `฿${totalAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
                     totalSummary.style.display = 'block';
                 } else {
-                    // ซ่อนส่วนสรุปยอดถ้าไม่พบคอลัมน์ Amount
                     totalSummary.style.display = 'none';
                 }
             }
+            
+            // Helper functions for UI
+            function showLoader() {
+                errorContainer.style.display = 'none';
+                reportTable.style.display = 'none';
+                totalSummary.style.display = 'none';
+                loader.style.display = 'flex';
+            }
+
+            function hideLoader() {
+                loader.style.display = 'none';
+                reportTable.style.display = 'table';
+            }
+
+            function showError(message) {
+                hideLoader();
+                tabsContainer.innerHTML = '';
+                errorContainer.style.display = 'block';
+                errorContainer.innerHTML = `<div class="error-message"><strong>เกิดข้อผิดพลาด:</strong> ${message}</div>`;
+                console.error('Error:', message);
+            }
 
             // เริ่มการทำงานของแอป
-            fetchData();
+            initializeApp();
         });
     </script>
 </body>
