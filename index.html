@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>รายงานรับโอนเงินรายวัน</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* CSS Variables for easy theming */
+        :root {
+            --primary-color: #4a90e2;
+            --secondary-color: #f5f7fa;
+            --font-color: #333;
+            --border-color: #e0e0e0;
+            --shadow-color: rgba(0, 0, 0, 0.1);
+            --success-color: #28a745;
+            --error-color: #d9534f;
+        }
+
+        /* Basic Setup */
+        body {
+            font-family: 'Sarabun', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 1rem;
+            background-color: var(--secondary-color);
+            color: var(--font-color);
+            line-height: 1.6;
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 1.5rem;
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px var(--shadow-color);
+        }
+
+        /* Header Section */
+        header {
+            text-align: center;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid var(--primary-color);
+            padding-bottom: 1rem;
+        }
+        h1 {
+            color: var(--primary-color);
+            margin: 0;
+            font-size: 1.8rem;
+            font-weight: 700;
+        }
+        .last-updated {
+            margin: 0.5rem 0 0;
+            color: #667;
+            font-size: 0.9rem;
+        }
+
+        /* Loading Spinner */
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 3rem 0;
+        }
+        .spinner {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--primary-color);
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Table Wrapper */
+        .table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        }
+        
+        /* Data Table Styling */
+        .report-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .report-table th, .report-table td {
+            padding: 0.9rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap; /* Prevent text wrapping */
+        }
+        .report-table thead {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        .report-table th {
+            font-weight: 600;
+        }
+        .report-table tbody tr:nth-child(even) {
+            background-color: var(--secondary-color);
+        }
+        .report-table tbody tr:hover {
+            background-color: #e9eff5;
+        }
+
+        /* Total Summary Box */
+        .total-summary {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(45deg, var(--primary-color), var(--success-color));
+            color: white;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
+        }
+        .total-summary h2 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.2rem;
+            font-weight: 600;
+            opacity: 0.9;
+        }
+        .total-summary p {
+            margin: 0;
+            font-size: 2.5rem;
+            font-weight: 700;
+        }
+
+        /* Error Message Styling */
+        .error-message {
+            text-align: center;
+            padding: 2rem;
+            color: var(--error-color);
+            background-color: #fdf2f2;
+            border: 1px solid #fadddd;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>📊 รายงานรับโอนเงินรายวัน</h1>
+            <p class="last-updated">อัปเดตล่าสุด: <span id="last-updated">กำลังโหลด...</span></p>
+        </header>
+
+        <div id="loader" class="loading-spinner">
+            <div class="spinner"></div>
+        </div>
+
+        <div id="error-container" style="display:none;"></div>
+        
+        <div class="table-wrapper">
+            <table class="report-table" id="report-table" style="display:none;">
+                <thead>
+                    <tr id="table-header"></tr>
+                </thead>
+                <tbody id="table-body">
+                </tbody>
+            </table>
+        </div>
+
+        <div id="total-summary" class="total-summary" style="display:none;">
+            <h2>ยอดรวมทั้งหมด</h2>
+            <p id="total-amount">฿0.00</p>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener("DOMContentLoaded", () => {
+            // URL ของ Google Sheets ที่เผยแพร่เป็น CSV
+            const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSncBoJW7dCDJPxLKLd6pHdS8MM_TkYlv4dF4hmnr_wGfWm-yEi9c4i8PQ0M-PO7d9hlGvTSZKwKYI5/pub?output=csv';
+
+            // ดึง Element ต่างๆ จากหน้าเว็บ
+            const loader = document.getElementById('loader');
+            const reportTable = document.getElementById('report-table');
+            const tableHeader = document.getElementById('table-header');
+            const tableBody = document.getElementById('table-body');
+            const totalSummary = document.getElementById('total-summary');
+            const totalAmountEl = document.getElementById('total-amount');
+            const lastUpdatedEl = document.getElementById('last-updated');
+            const errorContainer = document.getElementById('error-container');
+
+            /**
+             * ฟังก์ชันหลักสำหรับดึงและแสดงข้อมูล
+             */
+            async function fetchData() {
+                try {
+                    // ใช้ timestamp เพื่อป้องกันปัญหา browser cache และดึงข้อมูลใหม่เสมอ
+                    const response = await fetch(`${CSV_URL}&t=${new Date().getTime()}`);
+                    if (!response.ok) {
+                        throw new Error(`ไม่สามารถโหลดข้อมูลได้ (Status: ${response.status})`);
+                    }
+                    const csvData = await response.text();
+                    
+                    parseAndDisplayCSV(csvData);
+                    
+                    // อัปเดตเวลาล่าสุด
+                    const now = new Date();
+                    lastUpdatedEl.textContent = now.toLocaleDateString('th-TH', {
+                        year: 'numeric', month: 'long', day: 'numeric',
+                        hour: '2-digit', minute: '2-digit'
+                    }) + ' น.';
+                    
+                    // แสดงผลลัพธ์และซ่อนตัวโหลด
+                    loader.style.display = 'none';
+                    reportTable.style.display = 'table';
+                    totalSummary.style.display = 'block';
+
+                } catch (error) {
+                    // แสดงข้อความเมื่อเกิดข้อผิดพลาด
+                    loader.style.display = 'none';
+                    errorContainer.style.display = 'block';
+                    errorContainer.innerHTML = `<div class="error-message"><strong>เกิดข้อผิดพลาด:</strong> ${error.message}<br>กรุณาตรวจสอบการเชื่อมต่ออินเทอร์เน็ตและลองอีกครั้ง</div>`;
+                    console.error('Fetch Error:', error);
+                }
+            }
+
+            /**
+             * ฟังก์ชันสำหรับแปลงข้อมูล CSV และแสดงผลในตาราง
+             * @param {string} csvData - ข้อมูลดิบในรูปแบบ CSV
+             */
+            function parseAndDisplayCSV(csvData) {
+                const rows = csvData.trim().split(/\r?\n/);
+                if (rows.length < 2) {
+                    tableBody.innerHTML = '<tr><td colspan="100%" style="text-align:center;">ไม่พบข้อมูล</td></tr>';
+                    return;
+                }
+                
+                const headers = rows[0].split(',');
+                const dataRows = rows.slice(1);
+
+                // 1. สร้าง Header ของตาราง
+                tableHeader.innerHTML = headers.map(header => `<th>${header.trim()}</th>`).join('');
+
+                // 2. ค้นหาคอลัมน์ที่มีจำนวนเงิน (Amount)
+                // ทำให้การค้นหาไม่สนตัวพิมพ์เล็ก-ใหญ่ (case-insensitive)
+                const amountColumnIndex = headers.findIndex(header => 
+                    header.trim().toLowerCase().includes('amount') || header.trim().includes('ยอด')
+                );
+
+                let totalAmount = 0;
+                tableBody.innerHTML = ''; // เคลียร์ข้อมูลเก่าก่อนแสดงผลใหม่
+
+                // 3. สร้าง Body ของตารางและคำนวณยอดรวม
+                dataRows.forEach(rowStr => {
+                    if (!rowStr) return; // ข้ามแถวที่ว่างเปล่า
+                    
+                    const rowData = rowStr.split(',');
+                    const rowElement = document.createElement('tr');
+                    
+                    let cellHtml = '';
+                    rowData.forEach((cellData, index) => {
+                        const trimmedData = cellData.trim();
+                        // ทำให้คอลัมน์ที่เป็นตัวเลขชิดขวาเพื่อความสวยงาม
+                        const isNumeric = !isNaN(parseFloat(trimmedData)) && isFinite(trimmedData);
+                        const alignStyle = isNumeric ? 'style="text-align: right;"' : '';
+                        cellHtml += `<td ${alignStyle}>${trimmedData}</td>`;
+                    });
+                    rowElement.innerHTML = cellHtml;
+                    tableBody.appendChild(rowElement);
+
+                    // คำนวณยอดรวมจากคอลัมน์ที่ถูกต้อง
+                    if (amountColumnIndex !== -1 && rowData[amountColumnIndex]) {
+                        // ลบตัวอักษรที่ไม่ใช่ตัวเลขออก (ยกเว้นจุดทศนิยม)
+                        const amount = parseFloat(rowData[amountColumnIndex].replace(/[^0-9.-]+/g,""));
+                        if (!isNaN(amount)) {
+                            totalAmount += amount;
+                        }
+                    }
+                });
+
+                // 4. แสดงผลยอดรวม
+                if (amountColumnIndex !== -1) {
+                    totalAmountEl.textContent = `฿${totalAmount.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                    totalSummary.style.display = 'block';
+                } else {
+                    // ซ่อนส่วนสรุปยอดถ้าไม่พบคอลัมน์ Amount
+                    totalSummary.style.display = 'none';
+                }
+            }
+
+            // เริ่มการทำงานของแอป
+            fetchData();
+        });
+    </script>
+</body>
+</html>
