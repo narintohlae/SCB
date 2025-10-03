@@ -687,26 +687,19 @@
     const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
     const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-    
-// Load Firebase config from secure sources (no hardcoded fallback)
-(function loadFirebaseConfig() {
-    // 1) window.__firebase_config or global __firebase_config
-    const envVar = (typeof window !== 'undefined') ? (window.__firebase_config ?? (typeof __firebase_config !== 'undefined' ? __firebase_config : null)) : null;
-    if (envVar) {
-        firebaseConfig = (typeof envVar === 'string') ? JSON.parse(envVar) : envVar;
+    if (typeof __firebase_config !== 'undefined' && __firebase_config) {
+        firebaseConfig = JSON.parse(__firebase_config);
+    } else {
+        console.warn("Firebase config not found in environment. Using local fallback. PLEASE REPLACE PLACEHOLDER VALUES.");
+        firebaseConfig = {
+            apiKey: "AIzaSyDOx9RPxrG-vO59QHjkhJtGmyDRhdoVFPY",
+            authDomain: "pos-6-23035.firebaseapp.com",
+            projectId: "pos-6-23035",
+            storageBucket: "pos-6-23035.appspot.com",
+            messagingSenderId: "1025982856125",
+            appId: "1:1025982856125:web:8c6cdf5712e44abe0f30d4"
+        };
     }
-
-    // 2) <script type="application/json" id="firebase-config">{...}</script>
-    if (!firebaseConfig) {
-        const el = document.getElementById('firebase-config');
-        const raw = el && (el.textContent || el.innerText || '').trim();
-        if (raw) firebaseConfig = JSON.parse(raw);
-    }
-
-    if (!firebaseConfig) {
-        throw new Error("Firebase config missing. Provide via window.__firebase_config = {...} before this script, or add <script type='application/json' id='firebase-config'>...</script>.");
-    }
-})();
 
     try {
         if (!firebaseConfig || !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith("YOUR_")) {
@@ -784,41 +777,24 @@ const POS_APP = {
         lastInputTimestamp: 0,
         isScanning: false,
         scanResetTimer: null,
+        // [Added] Scanner buffering
+        scanBuffer: '',
+        lastScanTs: 0,
+        _swallowEnterOnce: false,
+
     },
 
     renderCartItemElement(item) {
         const li = document.createElement('li');
         li.classList.add('cart-item-row');
-
-        const seq = document.createElement('span');
-        seq.className = 'col-seq';
-
-        const name = document.createElement('span');
-        name.className = 'col-name';
-        name.textContent = String(item.name ?? '');
-
-        const qty = document.createElement('span');
-        qty.className = 'col-qty';
-        qty.textContent = String(item.qty ?? 0);
-
-        const price = document.createElement('span');
-        price.className = 'col-price';
-        price.textContent = String(item.price ?? 0);
-
-        const total = document.createElement('span');
-        total.className = 'col-total';
-        const unit = Number(item.price || 0);
-        const q = Number(item.qty || 0);
-        total.textContent = (unit * q).toFixed(2);
-
-        const del = document.createElement('span');
-        del.className = 'col-delete';
-        const btn = document.createElement('button');
-        btn.className = 'delete-item-btn';
-        btn.textContent = 'x';
-        del.appendChild(btn);
-
-        li.append(seq, name, qty, price, total, del);
+        li.innerHTML = `
+            <span class="col-seq"></span>
+            <span class="col-name">${item.name}</span>
+            <span class="col-qty">${item.qty}</span>
+            <span class="col-price">${item.price}</span>
+            <span class="col-total">${(item.qty * item.price).toFixed(2)}</span>
+            <span class="col-delete"><button class="delete-item-btn">x</button></span>
+        `;
         updateCartHighlight(li, item.qty);
         return li;
     },
@@ -833,6 +809,8 @@ const POS_APP = {
     async start() {
         console.log("Initializing main application logic...");
         const barcodeInput = document.getElementById('barcode-input');
+                // [Added #4] First-capture scanner keystrokes
+        barcodeInput.addEventListener('keydown', this.handleKeyForScan.bind(this));
         if (barcodeInput) this.state.basePlaceholder = barcodeInput.getAttribute('data-base-placeholder');
         this.updatePlaceholderHint();
         this.clearDataOnStart();
@@ -859,18 +837,22 @@ const POS_APP = {
 
     showHistoryModal() {
         document.getElementById('history-modal').style.display = 'flex';
+                this.trapFocus('history-modal');
         this.setActiveOverlay('history');
     },
     hideHistoryModal() {
         document.getElementById('history-modal').style.display = 'none';
+                this.releaseFocusTrap();
         this.setActiveOverlay(null);
     },
     showSettingsModal() {
         document.getElementById('settings-modal').style.display = 'flex';
+                this.trapFocus('settings-modal');
         this.setActiveOverlay('settings');
     },
     hideSettingsModal() {
         document.getElementById('settings-modal').style.display = 'none';
+                this.releaseFocusTrap();
         this.setActiveOverlay(null);
     },
     
@@ -1348,11 +1330,15 @@ const POS_APP = {
     },
     showProductMgmtModal() { 
         document.getElementById('product-mgmt-modal').style.display = 'flex'; 
+                this.trapFocus('product-mgmt-modal');
         document.getElementById('product-search-input').value = ''; 
         this.state.productListPage = 1;
         this.renderProductList(); 
     },
-    hideProductMgmtModal() { document.getElementById('product-mgmt-modal').style.display = 'none'; },
+    hideProductMgmtModal() { 
+        document.getElementById('product-mgmt-modal').style.display = 'none'; 
+        this.releaseFocusTrap(); 
+    },
     showProductEditorModal(product = null) {
         this.state.currentEditingProductId = product ? product.id : null;
         const form = document.getElementById('product-editor-form');
@@ -1373,6 +1359,7 @@ const POS_APP = {
             this.addPricingUnitRow(); 
         }
         document.getElementById('product-editor-modal').style.display = 'flex';
+                this.trapFocus('product-editor-modal');
         const container = document.getElementById('pricing-units-container');
         if (this.state._costCalculationListener) {
             container.removeEventListener('input', this.state._costCalculationListener);
@@ -1408,7 +1395,10 @@ const POS_APP = {
         };
         container.addEventListener('input', this.state._costCalculationListener);
     },
-    hideProductEditorModal() { document.getElementById('product-editor-modal').style.display = 'none'; },
+    hideProductEditorModal() { 
+        document.getElementById('product-editor-modal').style.display = 'none'; 
+        this.releaseFocusTrap(); 
+    },
     renderProductList(filterText = '') {
         const container = document.getElementById('product-list-container');
         const lowercasedFilter = filterText.toLowerCase().trim();
@@ -1433,30 +1423,9 @@ const POS_APP = {
              this.renderPaginationControls(0);
              return;
         }
-        // Build header
-        container.innerHTML = '';
-        const frag = document.createDocumentFragment();
-        const header = document.createElement('div');
-        header.className = 'product-list-row header';
-        header.innerHTML = '<span>รหัส</span><span>สินค้า</span><span>หมวด</span><span>สต็อก</span><span>หน่วยราคา</span><span>การกระทำ</span>';
-        frag.appendChild(header);
-        paginatedItems.forEach(p => {
-            const row = document.createElement('div');
-            row.className = 'product-list-row';
-            row.dataset.id = p.id;
-            const c1 = document.createElement('span'); c1.textContent = String(p.productCode || '');
-            const c2 = document.createElement('span'); c2.textContent = String(p.productName || '');
-            const c3 = document.createElement('span'); c3.textContent = String(p.category || '');
-            const c4 = document.createElement('span'); c4.textContent = String(p.stock || 0);
-            const c5 = document.createElement('span'); c5.textContent = (p.pricingUnits && p.pricingUnits[0] ? (p.pricingUnits[0].price || 0).toFixed(2) : '0.00');
-            const c6 = document.createElement('span');
-            const btnEdit = document.createElement('button'); btnEdit.dataset.action='edit'; btnEdit.dataset.id = p.id; btnEdit.textContent='แก้ไข';
-            const btnDel = document.createElement('button'); btnDel.dataset.action='delete'; btnDel.dataset.id = p.id; btnDel.textContent='ลบ';
-            c6.appendChild(btnEdit); c6.appendChild(btnDel);
-            row.append(c1,c2,c3,c4,c5,c6);
-            frag.appendChild(row);
-        });
-        container.appendChild(frag);
+        const headerHTML = `<div class="product-list-row product-list-header"><span>ชื่อสินค้า (รหัส)</span><span>สต็อก</span><span>หน่วยราคา</span><span>การกระทำ</span></div>`;
+        const rowsHTML = paginatedItems.map(p => `<div class="product-list-row"><div><strong>${p.productName}</strong><div class="sub-text">${p.productCode || ''}</div><div class="sub-text">${p.category || 'ไม่มีหมวดหมู่'}</div></div><div class="sub-text">${p.stockInBaseUnits} ${p.baseUnit}</div><div class="sub-text">${(p.pricingUnits || []).map(u => `${u.unitName} (${this.calculateItemTotal(u, 1)}฿)`).join(', ')}</div><div><button type="button" class="edit-history-btn" data-action="edit" data-id="${p.id}">แก้ไข</button><button type="button" class="delete-history-btn" data-action="delete" data-id="${p.id}">ลบ</button></div></div>`).join('');
+        container.innerHTML = headerHTML + rowsHTML;
         this.renderPaginationControls(totalItems);
     },
     renderPaginationControls(totalItems) {
@@ -1546,6 +1515,127 @@ const POS_APP = {
         this.state.scanResetTimer = setTimeout(() => {
             this.state.isScanning = false;
         }, 100);
+    },
+    // [Added #4] Robust barcode scanner handler with time-threshold buffer
+    handleKeyForScan(e) {
+        try {
+            const now = Date.now();
+            const GAP = 25; // ms threshold to tell scanner vs human typing
+            if (typeof this.state.lastScanTs !== 'number') this.state.lastScanTs = 0;
+            if (typeof this.state.scanBuffer !== 'string') this.state.scanBuffer = '';
+
+            if (e.key === 'Enter') {
+                if (this.state.scanBuffer && (now - this.state.lastScanTs) < 2 * GAP) {
+                    e.preventDefault();
+                    this.state._swallowEnterOnce = true;
+                    const code = this.state.scanBuffer;
+                    this.state.scanBuffer = '';
+                    this.onBarcodeScanned(code);
+                    return;
+                }
+                return;
+            }
+
+            if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+            if (e.key && e.key.length === 1) {
+                const delta = now - this.state.lastScanTs;
+                if (delta < GAP) {
+                    this.state.scanBuffer += e.key;
+                    e.preventDefault();
+                } else {
+                    this.state.scanBuffer = e.key;
+                }
+                this.state.lastScanTs = now;
+            }
+        } catch (err) {
+            console.warn('handleKeyForScan error', err);
+        }
+    },
+
+    // [Added #4] What to do when a barcode is scanned
+    onBarcodeScanned(rawCode) {
+        const code = String(rawCode || '').trim().toLowerCase();
+        if (!code) return;
+        const unit = this.state.searchableProductUnits.find(p =>
+            (p.barcode && p.barcode.toLowerCase() === code) ||
+            (p.productCode && p.productCode.toLowerCase() === code)
+        );
+        if (unit) {
+            this.addToCart(unit, 1);
+            const input = document.getElementById('barcode-input');
+            if (input) input.value = '';
+            this.state.currentSearchResults = [];
+            this.state.selectedSearchIndex = -1;
+            this.displaySearchResults([], '');
+            this.toggleUIVisibility();
+        } else {
+            const input = document.getElementById('barcode-input');
+            if (input) {
+                input.value = rawCode;
+                this.handleInstantSearch({ target: input });
+            }
+        }
+    },
+
+    // [Added #5] Focus trap & ESC-to-close for modals
+    trapFocus(modalEl) {
+        const modal = typeof modalEl === 'string' ? document.getElementById(modalEl) : modalEl;
+        if (!modal) return;
+
+        const getFocusables = () => modal.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])');
+        const focusables = getFocusables();
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+
+        if (this.state.activeModalCloseHandler) {
+            document.removeEventListener('keydown', this.state.activeModalCloseHandler);
+        }
+
+        const handler = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this.hideAnyOpenModal();
+                return;
+            }
+            if (e.key !== 'Tab' || focusables.length === 0) return;
+
+            if (e.shiftKey && document.activeElement === first) {
+                e.preventDefault();
+                last.focus();
+            } else if (!e.shiftKey && document.activeElement === last) {
+                e.preventDefault();
+                first.focus();
+            }
+        };
+
+        this.state.activeModalCloseHandler = handler;
+        document.addEventListener('keydown', handler);
+
+        if (first) first.focus();
+    },
+
+    // Remove focus trap
+    releaseFocusTrap() {
+        if (this.state.activeModalCloseHandler) {
+            document.removeEventListener('keydown', this.state.activeModalCloseHandler);
+            this.state.activeModalCloseHandler = null;
+        }
+    },
+
+    // Utility: close whichever modal is open (called on ESC)
+    hideAnyOpenModal() {
+        if (document.getElementById('payment-modal')?.style.display === 'flex') { this.hidePaymentModal(); return; }
+        if (document.getElementById('delete-confirm-modal')?.style.display === 'flex') { this.hideDeleteConfirmModal(); return; }
+        if (document.getElementById('clear-options-modal')?.style.display === 'flex') { this.hideClearOptionsModal(); return; }
+        if (document.getElementById('product-mgmt-modal')?.style.display === 'flex') { this.hideProductMgmtModal(); return; }
+        if (document.getElementById('product-editor-modal')?.style.display === 'flex') { this.hideProductEditorModal(); return; }
+        if (document.getElementById('history-modal')?.style.display === 'flex') { this.hideHistoryModal(); return; }
+        if (document.getElementById('settings-modal')?.style.display === 'flex') { this.hideSettingsModal(); return; }
+        if (document.getElementById('receipt-settings-modal')?.style.display === 'flex') { this.hideReceiptSettingsModal(); return; }
+        if (document.getElementById('info-modal')?.style.display === 'flex') { this.hideInfoModal(); return; }
+    },
+ 100);
     },
 
     handleInstantSearch(e) {
@@ -1642,32 +1732,7 @@ const POS_APP = {
         });
     },
     escapeRegex(string) { return string.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&'); },
-    escapeHtml(string) { const p = document.createElement("p"); p.textContent = string; return p.innerHTML; }
-
-    computeLine({ price, qty, tier = null, discount = 0 }) {
-        let unit = Number(price || 0);
-        if (tier && typeof tier === 'object') {
-            if (tier.type === 'percent') unit = unit * (1 - Number(tier.value || 0) / 100);
-            else if (tier.type === 'flat') unit = Math.max(0, unit - Number(tier.value || 0));
-        }
-        const lineSubtotal = unit * Number(qty || 0);
-        const lineDiscount = Number(discount || 0);
-        const lineTotal = Math.max(0, lineSubtotal - lineDiscount);
-        return { unit, lineSubtotal, lineDiscount, lineTotal };
-    },
-    computeCart(cartItems = []) {
-        let sub = 0, disc = 0;
-        const lines = cartItems.map(it => {
-            const r = this.computeLine(it);
-            sub += r.lineSubtotal;
-            disc += r.lineDiscount;
-            return { ...it, ...r };
-        });
-        const total = Math.max(0, sub - disc);
-        return { lines, sub, disc, total };
-    },
-    refocusScanInput() { const el = document.getElementById('barcode-input') || document.getElementById('search-input'); if (el) { el.focus(); el.select?.(); } },
-,
+    escapeHtml(string) { const p = document.createElement("p"); p.textContent = string; return p.innerHTML; },
     addToCart(productUnit, quantityToAdd = 1) { 
         const cart = this.getActiveCart(); 
         if (!cart) return; 
@@ -1676,8 +1741,7 @@ const POS_APP = {
         if (existingProduct) { 
             existingProduct.quantity += quantityToAdd; 
             delete existingProduct.priceOverride;
-        this.refocusScanInput();
-    } else { 
+        } else { 
             const newItem = { cartItemId: cartItemId, productUnit: productUnit, quantity: quantityToAdd }; 
             cart.push(newItem); 
         } 
@@ -1770,7 +1834,7 @@ const POS_APP = {
                 li.classList.add('highlight-quantity');
             }
             const stockInThisUnit = productUnit.stockInBaseUnits / productUnit.pricingUnit.conversionFactor;
-            let itemInfoHTML = `<strong>${this.escapeHtml(productUnit.display)}</strong>`;
+            let itemInfoHTML = `<strong>${productUnit.display}</strong>`;
             if (!this.state.isRestrictedMode) {
                 itemInfoHTML += ` <span class="sub-text">(คงเหลือ: ${stockInThisUnit.toFixed(2)} ${productUnit.pricingUnit.unitName})(ต้นทุน: ${(productUnit.pricingUnit.cost || 0).toFixed(2)})</span>`;
             }
@@ -1838,6 +1902,8 @@ const POS_APP = {
         } 
     },
     handleSearchKeyDown(e) {
+                // [Added #4] Skip default handler if Enter was already handled by scanner logic
+        if (this.state._swallowEnterOnce) { this.state._swallowEnterOnce = false; return; }
         if (e.key === 'Enter') {
             e.preventDefault();
             const inputValue = document.getElementById('barcode-input').value.trim();
@@ -1996,6 +2062,7 @@ const POS_APP = {
         confirmText.textContent = `คุณแน่ใจหรือไม่ว่าต้องการล้างตะกร้าสินค้าทั้งหมด?`; 
         confirmBtn.onclick = () => { this.clearCart(); this.hideDeleteConfirmModal(); }; 
         document.getElementById('delete-confirm-modal').style.display = 'flex'; 
+                this.trapFocus('delete-confirm-modal');
         confirmBtn.focus(); 
     },
     updateCartOnInput(){ 
@@ -2014,10 +2081,12 @@ const POS_APP = {
         const cashInput = document.getElementById('cash-received-input'); 
         cashInput.value = ''; 
         document.getElementById('payment-modal').style.display = 'flex'; 
+                this.trapFocus('payment-modal');
         cashInput.focus(); 
     },
     hidePaymentModal() { 
         document.getElementById('payment-modal').style.display = 'none'; 
+                this.releaseFocusTrap();
         document.getElementById('barcode-input').focus(); 
     },
     calculateChange() { 
@@ -2337,9 +2406,13 @@ const POS_APP = {
             confirmBtn.onclick = () => this.executeDeleteSaleFromHistory(id); 
         } 
         document.getElementById('delete-confirm-modal').style.display = 'flex'; 
+                this.trapFocus('delete-confirm-modal');
         setTimeout(() => confirmBtn.focus(), 50); 
     },
-    hideDeleteConfirmModal() { document.getElementById('delete-confirm-modal').style.display = 'none'; },
+    hideDeleteConfirmModal() { 
+        document.getElementById('delete-confirm-modal').style.display = 'none'; 
+        this.releaseFocusTrap(); 
+    },
     async executeDeleteSaleFromHistory(firestoreId) { 
         const {api, db} = window.firebaseServices; 
         const docRef = api.doc(db, this.getSalesHistoryCollectionRef().path, firestoreId); 
@@ -2353,7 +2426,10 @@ const POS_APP = {
         } 
     },
     showClearOptionsModal() { document.getElementById('clear-options-modal').style.display = 'flex'; },
-    hideClearOptionsModal() { document.getElementById('clear-options-modal').style.display = 'none'; },
+    hideClearOptionsModal() { 
+        document.getElementById('clear-options-modal').style.display = 'none'; 
+        this.releaseFocusTrap(); 
+    },
     clearHistoryLocally() { 
         this.state.salesHistory = []; 
         this.updateHistoryDisplay(); 
@@ -2661,10 +2737,12 @@ filterHistoryByDateTime() {
         document.getElementById('receipt-phone').value = phone || '';
         document.getElementById('receipt-tax-id').value = taxId || '';
         document.getElementById('receipt-settings-modal').style.display = 'flex';
-    },
+            this.trapFocus('receipt-settings-modal');
+        },
     hideReceiptSettingsModal() {
         document.getElementById('receipt-settings-modal').style.display = 'none';
-    },
+            this.releaseFocusTrap();
+        },
 
 };
 
